@@ -45,12 +45,25 @@
             android:paddingHorizontal="@dimen/standard_half_padding"
             android:visibility="gone"
             app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintEnd_toStartOf="@id/root_toolbar_avatar"
+            app:layout_constraintEnd_toStartOf="@id/root_toolbar_content_search"
             app:layout_constraintStart_toEndOf="@id/root_toolbar_left_icon"
             app:layout_constraintTop_toTopOf="parent"
             app:queryHint="@string/actionbar_search"
             android:background="@drawable/rounded_search_view"
             app:searchHintIcon="@null" />
+
+        <androidx.appcompat.widget.AppCompatImageView
+            android:id="@+id/root_toolbar_content_search"
+            android:layout_width="@dimen/toolbar_avatar_size"
+            android:layout_height="0dp"
+            android:layout_marginHorizontal="@dimen/standard_half_margin"
+            android:padding="@dimen/standard_half_padding"
+            android:visibility="gone"
+            android:src="@drawable/ic_content_search"
+            android:contentDescription="@string/content_description_search_content"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintEnd_toStartOf="@id/root_toolbar_avatar"
+            app:layout_constraintTop_toTopOf="parent" />
 
         <androidx.appcompat.widget.AppCompatTextView
             android:id="@+id/root_toolbar_title"

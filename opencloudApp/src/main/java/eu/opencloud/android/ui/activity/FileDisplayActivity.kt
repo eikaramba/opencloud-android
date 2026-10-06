@@ -176,6 +176,14 @@ class FileDisplayActivity : FileActivity(),
 
     private var selectAllMenuItem: MenuItem? = null
 
+    /**
+     * Search state that was active when a second fragment (preview or details of a document) got
+     * opened. Back navigation uses it to get back to the search results, and to re-apply the search
+     * in case the search got cleared while the document was shown.
+     */
+    private var searchQueryOnSecondFragment: String = ""
+    private var contentSearchOnSecondFragment: Boolean = false
+
     private var fileWaitingToPreview: OCFile? = null
 
     private var syncInProgress = false
@@ -531,6 +539,13 @@ class FileDisplayActivity : FileActivity(),
      * @param fragment New second Fragment to set.
      */
     private fun setSecondFragment(fragment: Fragment) {
+        // Only remember a live search: re-creating the fragment later must not overwrite it with ""
+        val currentSearch = mainFileListFragment?.currentSearchQuery() ?: ""
+        if (currentSearch.isNotBlank()) {
+            searchQueryOnSecondFragment = currentSearch
+            contentSearchOnSecondFragment = mainFileListFragment?.isContentSearchActive() ?: false
+        }
+
         val transaction = supportFragmentManager.beginTransaction()
         transaction.replace(R.id.right_fragment_container, fragment, TAG_SECOND_FRAGMENT)
         transaction.commitNow()
@@ -563,6 +578,8 @@ class FileDisplayActivity : FileActivity(),
             tr.remove(second)
             tr.commitNow()
         }
+        searchQueryOnSecondFragment = ""
+        contentSearchOnSecondFragment = false
         updateFragmentsVisibility(false)
         updateToolbar(null)
     }
@@ -768,14 +785,38 @@ class FileDisplayActivity : FileActivity(),
         } else {
             // Every single menu is collapsed. We can navigate up.
             if (secondFragment != null) {
-                // If secondFragment was shown, we need to navigate to the parent of the displayed file
-                // Need a cleanup
-                val folderIdToDisplay =
-                    if (fileListOption == FileListOption.AV_OFFLINE) storageManager.getRootPersonalFolder()!!.id!!
-                    else secondFragment!!.file!!.parentId!!
-                mainFileListFragment?.navigateToFolderId(folderIdToDisplay)
-                cleanSecondFragment()
-                updateToolbar(mainFileListFragment?.getCurrentFile())
+                // The search may have been cleared while the document was opened, so the search
+                // state that was current when the document got opened is used if there is one.
+                val searchQuery =
+                    if (searchQueryOnSecondFragment.isNotBlank()) searchQueryOnSecondFragment
+                    else mainFileListFragment?.currentSearchQuery() ?: ""
+                val contentSearchEnabled =
+                    if (searchQueryOnSecondFragment.isNotBlank()) contentSearchOnSecondFragment
+                    else mainFileListFragment?.isContentSearchActive() ?: false
+
+                if (searchQuery.isNotBlank()) {
+                    // The document was opened out of a search, so going back returns to the search
+                    // results instead of to the folder that holds the document. That way the user
+                    // can keep checking the other hits of the same search.
+                    Timber.v("Back navigation from ${secondFragment!!.file?.fileName} keeps search ${searchQuery}")
+                    cleanSecondFragment()
+                    mainFileListFragment?.restoreSearch(searchQuery, contentSearchEnabled)
+                    updateToolbar(mainFileListFragment?.getCurrentFile())
+                    restoreSearchBarToolbar()
+                } else {
+                    // If secondFragment was shown, we need to navigate to the parent of the displayed file
+                    // Need a cleanup
+                    // The flat "available offline" root lists files of any folder, so only there the parent
+                    // of the file is not what the user came from. Inside an offline folder it is.
+                    val cameFromOfflineRoot = fileListOption == FileListOption.AV_OFFLINE &&
+                        mainFileListFragment?.getCurrentFile()?.remotePath == OCFile.ROOT_PATH
+                    val folderIdToDisplay =
+                        if (cameFromOfflineRoot) storageManager.getRootPersonalFolder()!!.id!!
+                        else secondFragment!!.file!!.parentId!!
+                    mainFileListFragment?.navigateToFolderId(folderIdToDisplay)
+                    cleanSecondFragment()
+                    updateToolbar(mainFileListFragment?.getCurrentFile())
+                }
             } else {
                 val currentDirDisplayed = mainFileListFragment?.getCurrentFile()
                 // If current file is null (we are in the spaces list, for example), close the app

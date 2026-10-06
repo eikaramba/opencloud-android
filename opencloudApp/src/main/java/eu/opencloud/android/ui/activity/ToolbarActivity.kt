@@ -84,7 +84,10 @@ abstract class ToolbarActivity : BaseActivity() {
         val toolbarTitle = findViewById<TextView>(R.id.root_toolbar_title)
         val searchView = findViewById<SearchView>(R.id.root_toolbar_search_view)
         val avatarView = findViewById<ImageView>(R.id.root_toolbar_avatar)
+        val contentSearchButton = findViewById<ImageView>(R.id.root_toolbar_content_search)
 
+        // The avatar only shows while the search bar is closed
+        avatarView.visibility = VISIBLE
         toolbarTitle.apply {
             isVisible = true
             text = title
@@ -93,20 +96,26 @@ abstract class ToolbarActivity : BaseActivity() {
                     toolbarTitle.isVisible = false
                     searchView.isVisible = true
                     searchView.isIconified = false
+                    contentSearchButton.visibility = VISIBLE
+                    avatarView.visibility = View.GONE
                 }
                 toolbarTitle.setCompoundDrawablesWithIntrinsicBounds(0, 0, R.drawable.ic_search, 0)
             } else {
                 setOnClickListener(null)
                 toolbarTitle.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
+                contentSearchButton.visibility = View.GONE
             }
         }
         toolbarTitle.setAccessibilityRole(className = Button::class.java)
 
         searchView.apply {
             isVisible = false
+            contentSearchButton.visibility = View.GONE
             setOnCloseListener {
                 searchView.visibility = View.GONE
                 toolbarTitle.visibility = VISIBLE
+                contentSearchButton.visibility = View.GONE
+                avatarView.visibility = VISIBLE
                 false
             }
             val textSearchView = findViewById<EditText>(androidx.appcompat.R.id.search_src_text)
@@ -114,6 +123,7 @@ abstract class ToolbarActivity : BaseActivity() {
             textSearchView.setHintTextColor(ContextCompat.getColor(applicationContext, R.color.search_view_hint_text))
             closeButton.setColorFilter(ContextCompat.getColor(applicationContext, R.color.white))
         }
+        contentSearchButton.setAccessibilityRole(className = Button::class.java)
 
         AccountUtils.getCurrentOpenCloudAccount(baseContext) ?: return
         if (isAvatarRequested) {
@@ -134,6 +144,26 @@ abstract class ToolbarActivity : BaseActivity() {
             val dialog = ManageAccountsDialogFragment.newInstance(AccountUtils.getCurrentOpenCloudAccount(applicationContext))
             dialog.show(supportFragmentManager, MANAGE_ACCOUNTS_DIALOG)
         }
+    }
+
+    /**
+     * Puts the toolbar back in the state it has while a search is running: the root toolbar is
+     * shown, the search bar keeps the query typed by the user and the "search inside files"
+     * button stays available.
+     */
+    open fun restoreSearchBarToolbar() {
+        // Screens that use the standard toolbar have no search bar to reopen
+        if (!getRootToolbar().isVisible) return
+
+        useStandardToolbar(false)
+
+        findViewById<TextView>(R.id.root_toolbar_title).isVisible = false
+        findViewById<SearchView>(R.id.root_toolbar_search_view).run {
+            visibility = View.VISIBLE
+            isIconified = false
+        }
+        findViewById<ImageView>(R.id.root_toolbar_content_search).visibility = VISIBLE
+        findViewById<ImageView>(R.id.root_toolbar_avatar).visibility = View.GONE
     }
 
     private fun useStandardToolbar(isToolbarStandard: Boolean) {

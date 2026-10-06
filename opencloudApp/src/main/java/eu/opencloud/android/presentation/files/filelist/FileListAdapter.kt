@@ -362,6 +362,11 @@ class FileListAdapter(
                         it.spacePathLine.spaceIcon.isVisible = false
                         it.spacePathLine.spaceName.isVisible = false
                     }
+                    val highlights = if (isSearchActive) fileWithSyncInfo.highlights else null
+                    it.searchHighlights.apply {
+                        isVisible = !highlights.isNullOrBlank()
+                        text = highlights?.let { snippet -> SearchHighlightFormatter.format(snippet) }
+                    }
                     it.threeDotMenu.setOnClickListener {
                         listener.onThreeDotButtonClick(fileWithSyncInfo = fileWithSyncInfo)
                     }

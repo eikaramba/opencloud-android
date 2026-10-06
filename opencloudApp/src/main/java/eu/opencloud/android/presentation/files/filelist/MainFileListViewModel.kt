@@ -68,6 +68,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
@@ -105,11 +106,21 @@ class MainFileListViewModel(
     val currentFolderDisplayed: MutableStateFlow<OCFile> = MutableStateFlow(initialFolderToDisplay)
     val fileListOption: MutableStateFlow<FileListOption> = MutableStateFlow(fileListOptionParam)
     private val searchFilter: MutableStateFlow<String> = MutableStateFlow("")
+    val contentSearchEnabled: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
+    /**
+     * The query typed by the user and the "search inside files" mode are combined into the KQL
+     * pattern understood by the server, and any change on either of them re-runs the search.
+     */
     @OptIn(FlowPreview::class)
-    private val debouncedSearchFilter: Flow<String> = searchFilter.debounce { query ->
-        if (query.isBlank()) 0L else SEARCH_DEBOUNCE_MS
-    }
+    private val effectiveSearchFilter: Flow<String> = combine(
+        searchFilter,
+        contentSearchEnabled,
+    ) { query, contentSearchOnly -> buildSearchPattern(query, contentSearchOnly) }
+        .debounce { pattern ->
+            if (pattern.isBlank()) 0L else SEARCH_DEBOUNCE_MS
+        }
+        .distinctUntilChanged()
 
     private val sortTypeAndOrder = MutableStateFlow(Pair(SortType.SORT_TYPE_BY_NAME, SortOrder.SORT_ORDER_ASCENDING))
     val space: MutableStateFlow<OCSpace?> = MutableStateFlow(null)
@@ -135,7 +146,7 @@ class MainFileListViewModel(
         combine(
             currentFolderDisplayed,
             fileListOption,
-            debouncedSearchFilter,
+            effectiveSearchFilter,
             sortTypeAndOrder,
             space,
         ) { currentFolderDisplayed, fileListOption, searchFilter, sortTypeAndOrder, space ->
@@ -304,15 +315,50 @@ class MainFileListViewModel(
         }
     }
 
-    fun updateFolderToDisplay(newFolderToDisplay: OCFile) {
+    /**
+     * Shows a folder. By default the search is dropped, since the user is leaving it.
+     *
+     * @param keepSearchOnSameFolder true for programmatic refreshes (activity resumed, folder sync
+     * finished...) that re-submit the folder already displayed: those must not throw away the
+     * search the user is looking at, e.g. while a document opened out of it is shown.
+     */
+    fun updateFolderToDisplay(newFolderToDisplay: OCFile, keepSearchOnSameFolder: Boolean = false) {
+        val keepSearch = keepSearchOnSameFolder && isSameFolder(currentFolderDisplayed.value, newFolderToDisplay)
         currentFolderDisplayed.update { newFolderToDisplay }
-        searchFilter.update { "" }
+        if (!keepSearch) {
+            searchFilter.update { "" }
+            contentSearchEnabled.update { false }
+        }
         updateSpace()
     }
+
+    private fun isSameFolder(a: OCFile, b: OCFile): Boolean =
+        if (a.id != null && b.id != null) a.id == b.id
+        else a.remotePath == b.remotePath && a.spaceId == b.spaceId && a.owner == b.owner
 
     fun updateSearchFilter(newSearchFilter: String) {
         searchFilter.update { newSearchFilter }
     }
+
+    /** Current, not necessarily debounced, search filter. */
+    fun currentSearchFilter(): String = searchFilter.value
+
+    /** Turns the "search inside the contents of all files" mode on or off */
+    fun setContentSearchEnabled(enabled: Boolean) {
+        contentSearchEnabled.update { enabled }
+    }
+
+    /** Flips the "search inside files" mode and returns the new state */
+    fun toggleContentSearch(): Boolean {
+        val enabled = !contentSearchEnabled.value
+        contentSearchEnabled.update { enabled }
+        return enabled
+    }
+
+    fun isContentSearchEnabled(): Boolean = contentSearchEnabled.value
+
+    /** True while the user is looking at the results of a search */
+    fun isSearchActive(): Boolean = searchFilter.value.isNotBlank()
 
     fun updateFileListOption(newFileListOption: FileListOption) {
         fileListOption.update { newFileListOption }
@@ -404,6 +450,32 @@ class MainFileListViewModel(
 
     }
 
+    /**
+     * Turns the raw query typed by the user into the KQL pattern sent to the server.
+     *
+     * In "search inside files" mode a plain term is restricted to the extracted contents of the
+     * files. Queries that already carry KQL syntax (a field prefix like `content:`, a group or a
+     * boolean operator) are sent untouched so that e.g. `content:"wandfarbe" AND .pdf` keeps
+     * working as the user wrote it.
+     */
+    private fun buildSearchPattern(query: String, contentSearchOnly: Boolean): String {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty() || !contentSearchOnly || !isFreeTextQuery(trimmed)) return trimmed
+        val escaped = trimmed.replace("\"", "\\\"")
+        return """content:"$escaped""""
+    }
+
+    /** True when the KQL pattern queries the extracted file contents */
+    private fun searchesFileContents(pattern: String): Boolean = pattern.contains("content:")
+
+    /** True for a plain term, i.e. a query that does not use any KQL feature yet */
+    private fun isFreeTextQuery(query: String): Boolean =
+        !query.contains(":") &&
+                !query.startsWith("(") &&
+                !query.contains(" AND ") &&
+                !query.contains(" OR ") &&
+                !query.contains(" NOT ")
+
     private fun composeFileListUiStateForThisParams(
         currentFolderDisplayed: OCFile,
         fileListOption: FileListOption,
@@ -453,6 +525,8 @@ class MainFileListViewModel(
         }
         val filesWithSyncInfo = (searchResult.getDataOrNull() ?: emptyList())
             .filter { showHiddenFiles || !it.file.fileName.startsWith(".") }
+            // Snippets only make sense when the file contents were searched
+            .map { if (searchesFileContents(searchFilter)) it else it.copy(highlights = null) }
             .let { sortList(it, sortTypeAndOrder) }
 
         emit(

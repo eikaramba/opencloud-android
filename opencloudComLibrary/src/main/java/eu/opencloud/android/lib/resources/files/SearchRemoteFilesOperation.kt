@@ -31,6 +31,7 @@ import eu.opencloud.android.lib.common.http.HttpConstants.HTTP_OK
 import eu.opencloud.android.lib.common.http.methods.webdav.SearchMethod
 import eu.opencloud.android.lib.common.http.methods.webdav.properties.OCChecksums
 import eu.opencloud.android.lib.common.http.methods.webdav.properties.OCFileId
+import eu.opencloud.android.lib.common.http.methods.webdav.properties.OCHighlights
 import eu.opencloud.android.lib.common.http.methods.webdav.properties.OCShareTypes
 import eu.opencloud.android.lib.common.http.methods.webdav.properties.OCSpaceId
 import eu.opencloud.android.lib.common.operations.RemoteOperation
@@ -52,6 +53,7 @@ class SearchRemoteFilesOperation(
             PropertyRegistry.register(OCChecksums.Factory())
             PropertyRegistry.register(OCFileId.Factory())
             PropertyRegistry.register(OCSpaceId.Factory())
+            PropertyRegistry.register(OCHighlights.Factory())
 
             val targetUrl = getTargetUrl(client)
             Timber.d("REPORT search '$searchQuery' -> url=$targetUrl, spaceId=$spaceId")

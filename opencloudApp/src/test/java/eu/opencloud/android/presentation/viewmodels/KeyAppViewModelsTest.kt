@@ -413,6 +413,114 @@ class KeyAppViewModelsTest : ViewModelTest() {
     }
 
     @Test
+    fun `MainFileListViewModel content search mode restricts the query to file contents`() = runTest(testCoroutineDispatcher) {
+        val contentSearchQuery = """content:"wandfarbe""""
+        val manualKqlQuery = """content:"wandfarbe" AND .pdf"""
+        val sharedPreferencesProvider = mockk<SharedPreferencesProvider>(relaxed = true)
+        every { sharedPreferencesProvider.getBoolean(any(), any()) } returns false
+        every { sharedPreferencesProvider.getInt(PREF_FILE_LIST_SORT_TYPE, any()) } returns SortType.SORT_TYPE_BY_NAME.ordinal
+        every { sharedPreferencesProvider.getInt(PREF_FILE_LIST_SORT_ORDER, any()) } returns SortOrder.SORT_ORDER_ASCENDING.ordinal
+
+        val searchFilesUseCase = mockk<SearchFilesUseCase>()
+        every {
+            searchFilesUseCase(
+                SearchFilesUseCase.Params(
+                    searchQuery = contentSearchQuery,
+                    accountName = OC_ROOT_FOLDER.owner,
+                    spaceId = null,
+                )
+            )
+        } returns UseCaseResult.Success(listOf(OC_FILE_WITH_SYNC_INFO))
+
+        every {
+            searchFilesUseCase(
+                SearchFilesUseCase.Params(
+                    searchQuery = manualKqlQuery,
+                    accountName = OC_ROOT_FOLDER.owner,
+                    spaceId = null,
+                )
+            )
+        } returns UseCaseResult.Success(listOf(OC_FILE_WITH_SYNC_INFO))
+
+        val getFolderContentAsStreamUseCase = mockk<GetFolderContentAsStreamUseCase>()
+        every { getFolderContentAsStreamUseCase(any()) } returns flowOf(emptyList())
+        val getAppRegistryWhichAllowCreationAsStreamUseCase = mockk<GetAppRegistryWhichAllowCreationAsStreamUseCase>()
+        every { getAppRegistryWhichAllowCreationAsStreamUseCase(any()) } returns flowOf(emptyList())
+        val getSpaceWithSpecialsByIdForAccountUseCase = mockk<GetSpaceWithSpecialsByIdForAccountUseCase>()
+        every { getSpaceWithSpecialsByIdForAccountUseCase(any()) } returns OC_SPACE_PERSONAL
+
+        val viewModel = MainFileListViewModel(
+            getFolderContentAsStreamUseCase = getFolderContentAsStreamUseCase,
+            getSharedByLinkForAccountAsStreamUseCase = mockk(relaxed = true),
+            getFilesAvailableOfflineFromAccountAsStreamUseCase = mockk(relaxed = true),
+            getFileByIdUseCase = mockk(relaxed = true),
+            getFileByRemotePathUseCase = mockk(relaxed = true),
+            getSpaceWithSpecialsByIdForAccountUseCase = getSpaceWithSpecialsByIdForAccountUseCase,
+            sortFilesWithSyncInfoUseCase = SortFilesWithSyncInfoUseCase(),
+            synchronizeFolderUseCase = mockk(relaxed = true),
+            searchFilesUseCase = searchFilesUseCase,
+            getAppRegistryWhichAllowCreationAsStreamUseCase = getAppRegistryWhichAllowCreationAsStreamUseCase,
+            getAppRegistryForMimeTypeAsStreamUseCase = mockk(relaxed = true),
+            getUrlToOpenInWebUseCase = mockk(relaxed = true),
+            filterFileMenuOptionsUseCase = mockk(relaxed = true),
+            contextProvider = contextProvider,
+            coroutinesDispatcherProvider = coroutineDispatcherProvider,
+            sharedPreferencesProvider = sharedPreferencesProvider,
+            initialFolderToDisplay = OC_ROOT_FOLDER,
+            fileListOptionParam = FileListOption.ALL_FILES,
+        )
+
+        val states = mutableListOf<MainFileListViewModel.FileListUiState>()
+        val job = launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.fileListUiState.collect { states.add(it) }
+        }
+
+        viewModel.updateSearchFilter("wandfarbe")
+        viewModel.toggleContentSearch()
+        testScheduler.advanceTimeBy(350)
+        testScheduler.runCurrent()
+
+        verify {
+            searchFilesUseCase(
+                SearchFilesUseCase.Params(
+                    searchQuery = contentSearchQuery,
+                    accountName = OC_ROOT_FOLDER.owner,
+                    spaceId = null,
+                )
+            )
+        }
+
+        val successState = states.filterIsInstance<MainFileListViewModel.FileListUiState.Success>().lastOrNull()
+        assertTrue(successState != null)
+        assertEquals(contentSearchQuery, successState?.searchFilter)
+        assertTrue(viewModel.isContentSearchEnabled())
+
+        // Queries that already carry KQL syntax are sent as they are typed, even in content mode
+        viewModel.updateSearchFilter(manualKqlQuery)
+        testScheduler.advanceTimeBy(350)
+        testScheduler.runCurrent()
+
+        verify {
+            searchFilesUseCase(
+                SearchFilesUseCase.Params(
+                    searchQuery = manualKqlQuery,
+                    accountName = OC_ROOT_FOLDER.owner,
+                    spaceId = null,
+                )
+            )
+        }
+
+        val kqlState = states.filterIsInstance<MainFileListViewModel.FileListUiState.Success>().lastOrNull()
+        assertEquals(manualKqlQuery, kqlState?.searchFilter)
+
+        // Browsing into a folder clears the search, and with it the content search mode
+        viewModel.updateFolderToDisplay(OC_FOLDER)
+        assertFalse(viewModel.isContentSearchEnabled())
+
+        job.cancel()
+    }
+
+    @Test
     fun `MainFileListViewModel manageBrowseUp resolves parent via remote path when parentId is null`() =
         runTest(testCoroutineDispatcher) {
             val sharedPreferencesProvider = mockk<SharedPreferencesProvider>(relaxed = true)

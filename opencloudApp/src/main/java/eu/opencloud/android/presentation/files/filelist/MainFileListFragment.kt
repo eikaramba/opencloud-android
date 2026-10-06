@@ -187,6 +187,8 @@ class MainFileListFragment : Fragment(),
     private var checkedFiles: List<OCFile> = emptyList()
     private var filesToRemove: List<OCFile> = emptyList()
     private var searchView: SearchView? = null
+    private var contentSearchButton: ImageView? = null
+    private var contentSearchMenuButton: ImageView? = null
     private var fileSingleFile: OCFile? = null
     private var fileOptionsBottomSheetSingleFileLayout: LinearLayout? = null
     private var succeededTransfers: List<OCTransfer>? = null
@@ -352,6 +354,7 @@ class MainFileListFragment : Fragment(),
         (menu.findItem(R.id.action_search).actionView as SearchView).run {
             setOnQueryTextListener(this@MainFileListFragment)
             queryHint = resources.getString(R.string.actionbar_search)
+            addContentSearchMenuItem(this)
         }
         (menu.findItem(R.id.action_select_all)).setOnMenuItemClickListener {
             fileListAdapter.selectAll()
@@ -434,11 +437,83 @@ class MainFileListFragment : Fragment(),
         setFabMainContentDescription()
 
         setTextHintRootToolbar()
+        setContentSearchButtonListener()
     }
 
     private fun setTextHintRootToolbar() {
         val searchViewRootToolbar = requireActivity().findViewById<SearchView>(R.id.root_toolbar_search_view)
         searchViewRootToolbar.queryHint = getString(R.string.actionbar_search)
+    }
+
+    /**
+     * Wires the toolbar button that turns the search into a full-text search, so that the user does
+     * not need to type the `content:` KQL prefix by hand. Queries that already use KQL syntax are
+     * still sent as they are typed.
+     */
+    private fun setContentSearchButtonListener() {
+        contentSearchButton = requireActivity().findViewById<ImageView>(R.id.root_toolbar_content_search)
+        contentSearchButton?.let { button ->
+            button.setOnClickListener {
+                val contentSearchEnabled = mainFileListViewModel.toggleContentSearch()
+                showMessageInSnackbar(
+                    message = getString(
+                        if (contentSearchEnabled) R.string.search_content_enabled
+                        else R.string.search_content_disabled,
+                    ),
+                    duration = Snackbar.LENGTH_SHORT,
+                )
+            }
+            setContentSearchIcon(mainFileListViewModel.isContentSearchEnabled())
+        }
+    }
+
+    /**
+     * Folders other than the root use the standard toolbar, whose search view lives in the options
+     * menu. A menu item would be squeezed out by the expanded search view, so the "search inside
+     * files" toggle is placed inside the search view itself, in front of its clear button.
+     */
+    private fun addContentSearchMenuItem(menuSearchView: SearchView) {
+        val plate = menuSearchView.findViewById<LinearLayout>(androidx.appcompat.R.id.search_plate) ?: return
+        val size = resources.getDimensionPixelSize(R.dimen.icon_button_size)
+        val button = ImageView(requireContext()).apply {
+            layoutParams = LinearLayout.LayoutParams(size, ViewGroup.LayoutParams.MATCH_PARENT)
+            scaleType = ImageView.ScaleType.CENTER
+            setColorFilter(ContextCompat.getColor(requireContext(), R.color.white))
+            contentDescription = getString(R.string.content_description_search_content)
+            background = ContextCompat.getDrawable(
+                requireContext(),
+                androidx.appcompat.R.drawable.abc_item_background_holo_dark,
+            )
+            setOnClickListener {
+                val enabled = mainFileListViewModel.toggleContentSearch()
+                showMessageInSnackbar(
+                    message = getString(if (enabled) R.string.search_content_enabled else R.string.search_content_disabled),
+                    duration = Snackbar.LENGTH_SHORT,
+                )
+            }
+        }
+        plate.addView(button, 0.coerceAtLeast(plate.indexOfChild(plate.findViewById(androidx.appcompat.R.id.search_close_btn))))
+        contentSearchMenuButton = button
+        setContentSearchIcon(mainFileListViewModel.isContentSearchEnabled())
+    }
+
+    private fun setContentSearchIcon(contentSearchEnabled: Boolean) {
+        contentSearchMenuButton?.setImageResource(
+            if (contentSearchEnabled) R.drawable.ic_content_search_active
+            else R.drawable.ic_content_search,
+        )
+        contentSearchButton?.let {
+            it.setImageResource(
+                if (contentSearchEnabled) R.drawable.ic_content_search_active
+                else R.drawable.ic_content_search,
+            )
+        }
+    }
+
+    private fun observeContentSearchMode() {
+        collectLatestLifecycleFlow(mainFileListViewModel.contentSearchEnabled) { contentSearchEnabled ->
+            setContentSearchIcon(contentSearchEnabled)
+        }
     }
 
     private fun setViewTypeSelector(additionalView: SortOptionsView.AdditionalView) {
@@ -479,6 +554,9 @@ class MainFileListFragment : Fragment(),
 
         // Observe the app registry for a single file
         observeAppRegistryMimeTypeSingleFile()
+
+        // Observe the "search inside files" mode to keep the toolbar button in sync
+        observeContentSearchMode()
 
         // Observe the file list UI state
         observeFileListUiState()
@@ -923,7 +1001,7 @@ class MainFileListFragment : Fragment(),
     }
 
     fun navigateToFolder(folder: OCFile) {
-        mainFileListViewModel.updateFolderToDisplay(newFolderToDisplay = folder)
+        mainFileListViewModel.updateFolderToDisplay(newFolderToDisplay = folder, keepSearchOnSameFolder = true)
     }
 
     private fun showOrHideEmptyView(fileListUiState: MainFileListViewModel.FileListUiState.Success) {
@@ -993,9 +1071,11 @@ class MainFileListFragment : Fragment(),
     }
 
     fun updateFileListOption(newFileListOption: FileListOption, file: OCFile) {
+        val sameOption = mainFileListViewModel.fileListOption.value == newFileListOption
         mainFileListViewModel.updateFileListOption(newFileListOption)
         binding.swipeRefreshMainFileList.isEnabled = newFileListOption != FileListOption.AV_OFFLINE
-        mainFileListViewModel.updateFolderToDisplay(file)
+        // Resuming the activity re-submits the current view: that must not end a running search
+        mainFileListViewModel.updateFolderToDisplay(file, keepSearchOnSameFolder = sameOption)
         showOrHideFab(newFileListOption, file)
     }
 
@@ -1345,6 +1425,27 @@ class MainFileListFragment : Fragment(),
 
     fun getCurrentSpace(): OCSpace? =
         mainFileListViewModel.getSpace()
+
+    /** True while the file list shows the results of a search */
+    fun isSearchActive(): Boolean =
+        mainFileListViewModel.isSearchActive()
+
+    /** Search term currently entered in the root search bar */
+    fun currentSearchQuery(): String =
+        mainFileListViewModel.currentSearchFilter()
+
+    /** True while the "search inside the contents of all files" mode is on */
+    fun isContentSearchActive(): Boolean =
+        mainFileListViewModel.isContentSearchEnabled()
+
+    /**
+     * Re-applies a search, e.g. when back navigation returns from a document that was opened out
+     * of a search and the search got cleared meanwhile.
+     */
+    fun restoreSearch(searchQuery: String, contentSearchOnly: Boolean) {
+        mainFileListViewModel.updateSearchFilter(searchQuery)
+        mainFileListViewModel.setContentSearchEnabled(contentSearchOnly)
+    }
 
     private fun setDrawerStatus(enabled: Boolean) {
         (activity as FileActivity).setDrawerLockMode(if (enabled) DrawerLayout.LOCK_MODE_UNLOCKED else DrawerLayout.LOCK_MODE_LOCKED_CLOSED)

@@ -160,6 +160,8 @@ class SpacesListFragment : SpacesListAdapter.SpacesListAdapterListener, Fragment
     private fun setTextHintRootToolbar() {
         val searchViewRootToolbar = requireActivity().findViewById<SearchView>(R.id.root_toolbar_search_view)
         searchViewRootToolbar.queryHint = getString(R.string.actionbar_search_space)
+        // Spaces are matched by name only, there is no content to search in them
+        requireActivity().findViewById<View>(R.id.root_toolbar_content_search).visibility = View.GONE
     }
 
     companion object {

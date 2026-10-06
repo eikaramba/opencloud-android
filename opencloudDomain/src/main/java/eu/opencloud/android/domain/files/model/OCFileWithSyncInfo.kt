@@ -29,4 +29,6 @@ data class OCFileWithSyncInfo(
     val downloadWorkerUuid: UUID? = null,
     val isSynchronizing: Boolean = false,
     val space: OCSpace? = null,
+    /** Snippet of a content search hit with `<mark>`-wrapped matches, null outside content searches. */
+    val highlights: String? = null,
 )

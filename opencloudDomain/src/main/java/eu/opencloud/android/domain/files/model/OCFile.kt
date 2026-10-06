@@ -59,6 +59,8 @@ data class OCFile(
     var sharedWithSharee: Boolean? = false,
     var sharedByLink: Boolean = false,
     val spaceId: String? = null,
+    /** Transient search hit snippet (`<mark>`-wrapped matches); never persisted. */
+    val highlights: String? = null,
 ) : Parcelable {
 
     val fileName: String

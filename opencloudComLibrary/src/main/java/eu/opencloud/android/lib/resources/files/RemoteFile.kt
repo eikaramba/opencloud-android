@@ -41,6 +41,7 @@ import at.bitfire.dav4jvm.property.OCSize
 import eu.opencloud.android.lib.common.http.HttpConstants
 import eu.opencloud.android.lib.common.http.methods.webdav.properties.OCChecksums
 import eu.opencloud.android.lib.common.http.methods.webdav.properties.OCFileId
+import eu.opencloud.android.lib.common.http.methods.webdav.properties.OCHighlights
 import eu.opencloud.android.lib.common.http.methods.webdav.properties.OCShareTypes
 import eu.opencloud.android.lib.common.http.methods.webdav.properties.OCSpaceId
 import eu.opencloud.android.lib.common.utils.isOneOf
@@ -79,6 +80,8 @@ data class RemoteFile(
     /** Server-reported checksums as raw "ALGORITHM:value" strings (e.g. "SHA1:1c68ea…"). */
     var checksums: List<String> = emptyList(),
     var spaceId: String? = null,
+    /** Search hit snippet with `<mark>`-wrapped matches; only set on content search results. */
+    var highlights: String? = null,
 ) : Parcelable {
 
     // To do: Quotas not used. Use or remove them.
@@ -149,6 +152,9 @@ data class RemoteFile(
                         if (remoteFile.spaceId == null) {
                             remoteFile.spaceId = property.spaceId
                         }
+                    }
+                    is OCHighlights -> {
+                        remoteFile.highlights = property.highlights
                     }
                     is OCSize -> {
                         remoteFile.size = property.size

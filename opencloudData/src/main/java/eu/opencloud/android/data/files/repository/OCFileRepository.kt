@@ -552,6 +552,8 @@ class OCFileRepository(
         accountName: String,
         spaceId: String?,
     ): List<OCFileWithSyncInfo> {
+        // Highlights are transient, so they are kept apart from the files that go through the database
+        val highlightsByFile = mutableMapOf<Pair<String, String?>, String>()
         val files: List<OCFile> = try {
             val remoteFiles = remoteFileDataSource.searchFiles(
                 searchQuery = searchQuery,
@@ -559,6 +561,9 @@ class OCFileRepository(
                 spaceId = spaceId,
             )
             remoteFiles.map { remoteFile ->
+                remoteFile.highlights?.takeIf { it.isNotBlank() }?.let {
+                    highlightsByFile[remoteFile.remotePath to remoteFile.spaceId] = it
+                }
                 val localFile = localFileDataSource.getFileByRemotePath(
                     remotePath = remoteFile.remotePath,
                     owner = remoteFile.owner,
@@ -604,6 +609,7 @@ class OCFileRepository(
                 downloadWorkerUuid = syncInfo?.downloadWorkerUuid,
                 isSynchronizing = syncInfo?.isSynchronizing ?: false,
                 space = space,
+                highlights = highlightsByFile[file.remotePath to file.spaceId],
             )
         }
     }
